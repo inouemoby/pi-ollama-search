@@ -1,7 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-// ─── Helpers ────────────────────────────────────────────────────
 function fmtAuthors(authors: Array<{ name: string }>): string {
   if (!authors || authors.length === 0) return "Unknown";
   return authors.slice(0, 5).map(a => a.name).join(", ") + (authors.length > 5 ? " et al." : "");
@@ -16,52 +15,36 @@ async function isOllamaLocalAvailable(): Promise<boolean> {
   } catch { return false; }
 }
 
-// ─── DuckDuckGo fallback search ────────────────────────────────
+// DuckDuckGo fallback
 async function ddgSearch(query: string, maxResults: number): Promise<Array<{ title: string; url: string; content: string }>> {
   const url = `https://lite.duckduckgo.com/lite?q=${encodeURIComponent(query)}`;
   const resp = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (compatible; pi-search-plus/1.0)" } });
   const html = await resp.text();
-
   const results: Array<{ title: string; url: string; content: string }> = [];
-
-  // Structure: <a class='result-link' href="//duckduckgo.com/l/?uddg=REAL_URL">TITLE</a> ... <td class='result-snippet'>SNIPPET</td>
   const linkRegex = /<a[^>]*class='result-link'[^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>/g;
-  let linkMatch: RegExpExecArray | null;
-
-  // Find snippets separately
   const snippetRegex = /<td class='result-snippet'>([\s\S]*?)<\/td>/g;
   const snippets: string[] = [];
   let snipMatch: RegExpExecArray | null;
   while ((snipMatch = snippetRegex.exec(html)) !== null) {
     snippets.push(snipMatch[1].replace(/<[^>]+>/g, "").replace(/&[a-z]+;/g, " ").replace(/\s+/g, " ").trim());
   }
-
+  let linkMatch: RegExpExecArray | null;
   let idx = 0;
   while ((linkMatch = linkRegex.exec(html)) !== null && results.length < maxResults) {
     let rawHref = linkMatch[1];
     if (rawHref.startsWith("//")) rawHref = "https:" + rawHref;
-
-    // Extract real URL from DDG redirect: /l/?uddg=REAL_URL&...
     let realUrl = rawHref;
     const uddgMatch = rawHref.match(/uddg=([^&]+)/);
-    if (uddgMatch) {
-      realUrl = decodeURIComponent(uddgMatch[1]);
-    }
-
-    results.push({
-      title: linkMatch[2].trim(),
-      url: realUrl,
-      content: snippets[idx] || "",
-    });
+    if (uddgMatch) realUrl = decodeURIComponent(uddgMatch[1]);
+    results.push({ title: linkMatch[2].trim(), url: realUrl, content: snippets[idx] || "" });
     idx++;
   }
-
   return results;
 }
 
 export default function (pi: ExtensionAPI) {
 
-  // ── web_search — Ollama local (primary) or DuckDuckGo (fallback) ──
+  // ── web_search ──────────────────────────────────────────────
   pi.registerTool({
     name: "web_search",
     label: "Web Search",
@@ -80,8 +63,7 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_id, params, signal, _onUpdate, _ctx) {
       const maxResults = Math.min(params.max_results ?? 5, 10);
-
-      // Try local Ollama first
+      // Try local Ollama
       if (await isOllamaLocalAvailable()) {
         try {
           const resp = await fetch("http://localhost:11434/api/experimental/web_search", {
@@ -98,19 +80,18 @@ export default function (pi: ExtensionAPI) {
                 `${i + 1}. ${r.title}\n   URL: ${r.url}\n   ${r.content}`
               ).join("\n\n");
               return {
-                content: [{ type: "text", text: formatted }],
-                details: { source: "ollama-local", query: params.query, count: results.length },
+                content: [{ type: "text", text: `Found ${results.length} result(s) for "${params.query}":\n\n${formatted}` }],
+                details: { source: "ollama-local", query: params.query, count: results.length, results },
               };
             }
           }
-        } catch { /* fall through to DDG */ }
+        } catch { /* fallback to DDG */ }
       }
-
       // Fallback: DuckDuckGo
       const results = await ddgSearch(params.query, maxResults);
       if (results.length === 0) {
         return {
-          content: [{ type: "text", text: "No results found for: " + params.query }],
+          content: [{ type: "text", text: `No results found for: ${params.query}` }],
           details: { query: params.query, count: 0 },
         };
       }
@@ -118,18 +99,18 @@ export default function (pi: ExtensionAPI) {
         `${i + 1}. ${r.title}\n   URL: ${r.url}\n   ${r.content}`
       ).join("\n\n");
       return {
-        content: [{ type: "text", text: formatted }],
-        details: { source: "duckduckgo", query: params.query, count: results.length },
+        content: [{ type: "text", text: `Found ${results.length} result(s) for "${params.query}":\n\n${formatted}` }],
+        details: { source: "duckduckgo", query: params.query, count: results.length, results },
       };
     },
   });
 
-  // ── web_fetch — Ollama local (primary) or direct HTTP (fallback) ──
+  // ── web_fetch ────────────────────────────────────────────────
   pi.registerTool({
     name: "web_fetch",
     label: "Web Fetch",
     description:
-      "Fetch and extract text content from a web page URL. Use after web_search to read a specific result in full.",
+      "Fetch and extract text content from a web page URL. Use after web_search to read a specific result in detail.",
     promptSnippet: "Fetch full text content from a URL",
     promptGuidelines: [
       "Use web_fetch after web_search to read a promising result in detail.",
@@ -140,7 +121,6 @@ export default function (pi: ExtensionAPI) {
       url: Type.String({ description: "Full URL to fetch content from." }),
     }),
     async execute(_id, params, signal, _onUpdate, _ctx) {
-      // Try local Ollama first
       if (await isOllamaLocalAvailable()) {
         try {
           const resp = await fetch("http://localhost:11434/api/experimental/web_fetch", {
@@ -156,31 +136,20 @@ export default function (pi: ExtensionAPI) {
               details: { source: "ollama-local", title: data.title, url: params.url },
             };
           }
-        } catch { /* fall through */ }
+        } catch { /* fallback */ }
       }
-
-      // Fallback: direct HTTP fetch
       const resp = await fetch(params.url, {
         headers: { "User-Agent": "Mozilla/5.0 (compatible; pi-search-plus/1.0)" },
         signal,
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching ${params.url}`);
       const html = await resp.text();
-
-      // Simple text extraction: strip tags
       const text = html
         .replace(/<script[\s\S]*?<\/script>/gi, "")
         .replace(/<style[\s\S]*?<\/style>/gi, "")
         .replace(/<[^>]+>/g, " ")
-        .replace(/&nbsp;/g, " ")
-        .replace(/&amp;/g, "&")
-        .replace(/&lt;/g, "<")
-        .replace(/&gt;/g, ">")
-        .replace(/&quot;/g, '"')
-        .replace(/\s+/g, " ")
-        .trim()
-        .slice(0, 8000);
-
+        .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
+        .replace(/\s+/g, " ").trim().slice(0, 8000);
       return {
         content: [{ type: "text", text: text || "(no text content extracted)" }],
         details: { source: "direct", url: params.url },
@@ -207,19 +176,16 @@ export default function (pi: ExtensionAPI) {
     async execute(_id, params, _signal, _onUpdate, _ctx) {
       const maxResults = Math.min(params.max_results ?? 5, 20);
       const url = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(params.query)}&limit=${maxResults}&fields=title,authors,year,citationCount,venue,abstract,externalIds`;
-
       const resp = await fetch(url, { headers: { "User-Agent": "pi-search-plus/1.0" } });
       if (!resp.ok) throw new Error(`Semantic Scholar API error: ${resp.status}`);
       const data = (await resp.json()) as any;
-
       const papers = data.data || [];
       if (papers.length === 0) {
         return {
-          content: [{ type: "text", text: "No papers found for: " + params.query }],
+          content: [{ type: "text", text: `No papers found for: ${params.query}` }],
           details: { query: params.query, count: 0 },
         };
       }
-
       const lines = papers.map((p: any, i: number) => {
         const title = p.title || "Untitled";
         const authors = fmtAuthors(p.authors);
@@ -231,23 +197,20 @@ export default function (pi: ExtensionAPI) {
         if (p.externalIds?.DOI) ids.push("DOI: " + p.externalIds.DOI);
         if (p.externalIds?.ArXiv) ids.push("arXiv: " + p.externalIds.ArXiv);
         const idStr = ids.length > 0 ? "  [" + ids.join(" | ") + "]" : "";
-
-        let line = `${i + 1}. **${title}**\n`;
-        line += `   ${authors} (${year}) — cited ${citations}×`;
+        let line = `${i + 1}. **${title}**\n   ${authors} (${year}) — cited ${citations}×`;
         if (venue) line += `  · ${venue}`;
         line += idStr;
         if (abstract) line += `\n   > ${abstract}`;
         return line;
       });
-
       return {
-        content: [{ type: "text", text: lines.join("\n\n") }],
+        content: [{ type: "text", text: `Found ${papers.length} paper(s) for "${params.query}":\n\n${lines.join("\n\n")}` }],
         details: { query: params.query, count: papers.length, papers },
       };
     },
   });
 
-  // ── arxiv_search — arXiv API ───────────────────────────────
+  // ── arxiv_search ──────────────────────────────────────────
   pi.registerTool({
     name: "arxiv_search",
     label: "arXiv Search",
@@ -266,47 +229,40 @@ export default function (pi: ExtensionAPI) {
     async execute(_id, params, _signal, _onUpdate, _ctx) {
       const maxResults = Math.min(params.max_results ?? 5, 20);
       const url = `http://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(params.query)}&start=0&max_results=${maxResults}&sortBy=relevance`;
-
       const resp = await fetch(url, { headers: { "User-Agent": "pi-search-plus/1.0" } });
       if (!resp.ok) throw new Error(`arXiv API error: ${resp.status}`);
       const xml = await resp.text();
-
       const entries = xml.split("<entry>").slice(1);
       if (entries.length === 0) {
         return {
-          content: [{ type: "text", text: "No arXiv papers found for: " + params.query }],
+          content: [{ type: "text", text: `No arXiv papers found for: ${params.query}` }],
           details: { query: params.query, count: 0 },
         };
       }
-
       const tag = (xml: string, t: string): string => {
         const m = xml.match(new RegExp(`<${t}[^>]*>(.*?)</${t}>`, "s"));
         return m ? m[1].replace(/<[^>]+>/g, "").trim() : "";
       };
-
       const lines = entries.map((entry, i) => {
         const title = tag(entry, "title");
         const authors = entry.match(/<author>[\s\S]*?<name>(.*?)<\/name>[\s\S]*?<\/author>/g)
-          ?.map(a => a.match(/<name>(.*?)<\/name>/)?.[1] || "")
-          .filter(Boolean).join(", ") || "Unknown";
+          ?.map(a => a.match(/<name>(.*?)<\/name>/)?.[1] || "").filter(Boolean).join(", ") || "Unknown";
         const summary = tag(entry, "summary").slice(0, 400);
         const arxivId = tag(entry, "id").split("/abs/").pop() || "";
         const pdfLink = arxivId ? `https://arxiv.org/pdf/${arxivId}` : "";
-
         let line = `${i + 1}. **${title}**\n   ${authors}`;
         if (arxivId) line += `  [arXiv:${arxivId}](${pdfLink})`;
         if (summary) line += `\n   > ${summary}`;
         return line;
       });
-
       return {
-        content: [{ type: "text", text: lines.join("\n\n") }],
+        content: [{ type: "text", text: `Found ${lines.length} preprint(s) for "${params.query}":\n\n${lines.join("\n\n")}` }],
         details: { query: params.query, count: lines.length },
       };
     },
   });
 
-  // ── wiki_search — Wikipedia API ────────────────────────────
+  // ── wiki_search ────────────────────────────────────────────
   pi.registerTool({
     name: "wiki_search",
     label: "Wikipedia Search",
@@ -325,34 +281,30 @@ export default function (pi: ExtensionAPI) {
     async execute(_id, params, _signal, _onUpdate, _ctx) {
       const maxResults = Math.min(params.max_results ?? 5, 15);
       const url = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(params.query)}&srlimit=${maxResults}&format=json&origin=*`;
-
       const resp = await fetch(url, { headers: { "User-Agent": "pi-search-plus/1.0" } });
       if (!resp.ok) throw new Error(`Wikipedia API error: ${resp.status}`);
       const data = (await resp.json()) as any;
-
       const results = data.query?.search || [];
       if (results.length === 0) {
         return {
-          content: [{ type: "text", text: "No Wikipedia articles found for: " + params.query }],
+          content: [{ type: "text", text: `No Wikipedia articles found for: ${params.query}` }],
           details: { query: params.query, count: 0 },
         };
       }
-
       const lines = results.map((r: any, i: number) => {
         const title = r.title;
         const snippet = (r.snippet || "").replace(/<[^>]+>/g, "");
         const link = `https://en.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, "_"))}`;
         return `${i + 1}. **${title}**  — [link](${link})\n   > ${snippet}`;
       });
-
       return {
-        content: [{ type: "text", text: lines.join("\n\n") }],
+        content: [{ type: "text", text: `Found ${lines.length} article(s) for "${params.query}":\n\n${lines.join("\n\n")}` }],
         details: { query: params.query, count: lines.length },
       };
     },
   });
 
-  // ── book_search — Open Library API ─────────────────────────
+  // ── book_search ───────────────────────────────────────────
   pi.registerTool({
     name: "book_search",
     label: "Book Search",
@@ -370,19 +322,16 @@ export default function (pi: ExtensionAPI) {
     async execute(_id, params, _signal, _onUpdate, _ctx) {
       const maxResults = Math.min(params.max_results ?? 5, 15);
       const url = `https://openlibrary.org/search.json?q=${encodeURIComponent(params.query)}&limit=${maxResults}`;
-
       const resp = await fetch(url, { headers: { "User-Agent": "pi-search-plus/1.0" } });
       if (!resp.ok) throw new Error(`Open Library API error: ${resp.status}`);
       const data = (await resp.json()) as any;
-
       const docs = data.docs || [];
       if (docs.length === 0) {
         return {
-          content: [{ type: "text", text: "No books found for: " + params.query }],
+          content: [{ type: "text", text: `No books found for: ${params.query}` }],
           details: { query: params.query, count: 0 },
         };
       }
-
       const lines = docs.map((d: any, i: number) => {
         const title = d.title || "Untitled";
         const authors = (d.author_name || []).slice(0, 3).join(", ") || "Unknown";
@@ -395,9 +344,8 @@ export default function (pi: ExtensionAPI) {
         if (d.cover_i) line += `  [cover](https://covers.openlibrary.org/b/id/${d.cover_i}-M.jpg)`;
         return line;
       });
-
       return {
-        content: [{ type: "text", text: lines.join("\n\n") }],
+        content: [{ type: "text", text: `Found ${lines.length} book(s) for "${params.query}":\n\n${lines.join("\n\n")}` }],
         details: { query: params.query, count: lines.length },
       };
     },
