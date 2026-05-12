@@ -1,0 +1,14 @@
+{
+  "name": "pi-search-plus",
+  "version": "1.0.0",
+  "description": "Comprehensive search toolkit for pi: web search, academic papers (Semantic Scholar + arXiv), Wikipedia, books, images. Teaches LLM to search proactively.",
+  "keywords": ["pi-package", "search", "academic", "papers", "wikipedia", "web-search"],
+  "pi": {
+    "extensions": ["./index.ts"],
+    "skills": ["./skills"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  }
+}
