@@ -26,7 +26,7 @@ async function ddgSearch(query: string, maxResults: number): Promise<Array<{ tit
   const snippets: string[] = [];
   let snipMatch: RegExpExecArray | null;
   while ((snipMatch = snippetRegex.exec(html)) !== null) {
-    snippets.push(snipMatch[1].replace(/<[^>]+>/g, "").replace(/&[a-z]+;/g, " ").replace(/\s+/g, " ").trim());
+    snippets.push(snipMatch[1].replace(/<[^>]+>/g, "").replace(/&[a-z]+;/g, " ").replace(/\s+/g, " ").trim().slice(0, 300));
   }
   let linkMatch: RegExpExecArray | null;
   let idx = 0;
