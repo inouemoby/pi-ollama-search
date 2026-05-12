@@ -80,7 +80,7 @@ export default function (pi: ExtensionAPI) {
                 `${i + 1}. ${r.title}\n   URL: ${r.url}\n   ${r.content}`
               ).join("\n\n");
               return {
-                content: [{ type: "text", text: "Found " + results.length + " result(s)." }],
+                content: [{ type: "text", text: "Found " + results.length + " result(s) via Ollama local." }],
                 details: { source: "ollama-local", query: params.query, count: results.length, results },
               };
             }
@@ -99,7 +99,7 @@ export default function (pi: ExtensionAPI) {
         `${i + 1}. ${r.title}\n   URL: ${r.url}\n   ${r.content}`
       ).join("\n\n");
       return {
-                content: [{ type: "text", text: "Found " + results.length + " result(s)." }],
+        content: [{ type: "text", text: "Found " + results.length + " result(s) via DuckDuckGo." }],
         details: { source: "duckduckgo", query: params.query, count: results.length, results },
       };
     },
@@ -204,7 +204,7 @@ export default function (pi: ExtensionAPI) {
         return line;
       });
       return {
-        content: [{ type: "text", text: "Found " + papers.length + " paper(s)." }],
+        content: [{ type: "text", text: "Found " + papers.length + " paper(s) via Semantic Scholar." }],
         details: { query: params.query, count: papers.length, papers },
       };
     },
@@ -256,7 +256,7 @@ export default function (pi: ExtensionAPI) {
         return line;
       });
       return {
-        content: [{ type: "text", text: "Found " + lines.length + " preprint(s)." }],
+        content: [{ type: "text", text: "Found " + lines.length + " preprint(s) via arXiv." }],
         details: { query: params.query, count: lines.length },
       };
     },
@@ -298,7 +298,7 @@ export default function (pi: ExtensionAPI) {
         return `${i + 1}. **${title}**  — [link](${link})\n   > ${snippet}`;
       });
       return {
-        content: [{ type: "text", text: "Found " + lines.length + " article(s)." }],
+        content: [{ type: "text", text: "Found " + lines.length + " article(s) via Wikipedia." }],
         details: { query: params.query, count: lines.length },
       };
     },
@@ -345,7 +345,7 @@ export default function (pi: ExtensionAPI) {
         return line;
       });
       return {
-        content: [{ type: "text", text: "Found " + lines.length + " book(s)." }],
+        content: [{ type: "text", text: "Found " + lines.length + " book(s) via Open Library." }],
         details: { query: params.query, count: lines.length },
       };
     },
