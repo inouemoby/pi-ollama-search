@@ -1,12 +1,16 @@
 {
   "name": "pi-search-plus",
   "version": "1.0.0",
-  "description": "Complete search toolkit: web_search (news, forums, docs, blogs — your DEFAULT), web_fetch, paper_search, arxiv_search, wiki_search, book_search, image_search. Teaches LLM to search proactively. All free, no API keys.",
+  "description": "Complete search toolkit: web_search (news, forums, docs, blogs — your DEFAULT), web_fetch, paper_search, arxiv_search, wiki_search, book_search. Teaches LLM to search proactively. All free, no API keys.",
   "keywords": ["pi-package", "search", "academic", "papers", "wikipedia", "web-search"],
   "pi": {
     "extensions": ["./index.ts"],
     "skills": ["./skills"]
   },
+  "dependencies": {
+    "@ollama/pi-web-search": "latest"
+  },
+  "bundledDependencies": ["@ollama/pi-web-search"],
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
     "typebox": "*"
