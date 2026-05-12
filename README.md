@@ -1,6 +1,6 @@
 # pi-ollama-search
 
-Comprehensive search toolkit for [pi coding agent](https://github.com/earendil-works/pi-mono). Augments Ollama Cloud's built-in web search with academic, encyclopedia, book, and image search — all free, no API keys required.
+Complete search toolkit for [pi coding agent](https://github.com/earendil-works/pi-mono). **web_search is your default for any factual query** — it covers news, forums, docs, blogs, and the entire open web. Plus academic papers, Wikipedia, books, and page fetching. All free, no API keys.
 
 ## Install
 
@@ -10,23 +10,22 @@ pi install git:github.com/inouemoby/pi-ollama-search
 
 ## Tools
 
-| Tool | Source | Requires |
-|------|--------|----------|
-| `web_search` | Ollama Cloud | (built-in via @ollama/pi-web-search) |
-| `web_fetch` | Ollama Cloud | (built-in via @ollama/pi-web-search) |
-| `paper_search` | Semantic Scholar | Free, no key |
-| `arxiv_search` | arXiv API | Free, no key |
-| `wiki_search` | Wikipedia API | Free, no key |
-| `book_search` | Open Library | Free, no key |
-| `image_search` | Ollama Cloud web_search | Free |
+| Priority | Tool | What It Searches |
+|----------|------|------------------|
+| **#1** | `web_search` | The ENTIRE web — news, StackOverflow, Reddit, GitHub Issues, blogs, docs, reviews, everything |
+| | `web_fetch` | Read any URL's full text content |
+| | `paper_search` | 200M+ academic papers via Semantic Scholar |
+| | `arxiv_search` | Preprints in CS, math, physics, stats |
+| | `wiki_search` | Wikipedia articles |
+| | `book_search` | Books via Open Library |
 
 ## Skill
 
-The `search-plus` skill aggressively teaches the LLM to search proactively:
+The `search-plus` skill aggressively redirects the LLM away from memory-based answers:
 
-- 5 search strategy patterns (fact check, deep research, API usage, disambiguation, counter-claim)
-- 6 anti-patterns to avoid (guessing, unsourced claims, memory-only answers)
-- Core rule: "When in doubt, search. When not in doubt, search anyway."
+> "web_search is your DEFAULT for ANY factual query. Use proactively — your knowledge cutoff is real. When in doubt, SEARCH. When not in doubt, SEARCH ANYWAY."
+
+Five search strategy patterns + six anti-patterns (no guessing, no "based on my training data", no unsourced claims).
 
 ## License
 
