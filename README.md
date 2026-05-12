@@ -1,6 +1,6 @@
 # pi-ollama-search
 
-Complete search toolkit for [pi coding agent](https://github.com/earendil-works/pi-mono). **web_search is your default for any factual query** — it covers news, forums, docs, blogs, and the entire open web. Plus academic papers, Wikipedia, books, and page fetching. All free, no API keys.
+Complete search toolkit for [pi coding agent](https://github.com/earendil-works/pi-mono). **web_search is your default for any factual query** — it covers news, forums, docs, blogs, and the entire open web. Plus academic papers, Wikipedia, and books. All free, no API keys.
 
 ## Install
 
@@ -8,18 +8,18 @@ Complete search toolkit for [pi coding agent](https://github.com/earendil-works/
 pi install git:github.com/inouemoby/pi-ollama-search
 ```
 
-Requires `@ollama/pi-web-search` for `web_search` and `web_fetch` (usually pre-installed with pi). This plugin adds paper_search, arxiv_search, wiki_search, and book_search on top.
+Automatically installs `@ollama/pi-web-search` as a dependency — no extra steps needed.
 
 ## Tools
 
-| Priority | Tool | What It Searches |
-|----------|------|------------------|
-| **#1** | `web_search` | The ENTIRE web — news, StackOverflow, Reddit, GitHub Issues, blogs, docs, reviews, everything |
-| | `web_fetch` | Read any URL's full text content |
-| | `paper_search` | 200M+ academic papers via Semantic Scholar |
-| | `arxiv_search` | Preprints in CS, math, physics, stats |
-| | `wiki_search` | Wikipedia articles |
-| | `book_search` | Books via Open Library |
+| Priority | Tool | What It Searches | Source |
+|----------|------|------------------|--------|
+| **#1** | `web_search` | The ENTIRE web — news, StackOverflow, Reddit, GitHub Issues, blogs, docs, reviews, everything | @ollama/pi-web-search |
+| | `web_fetch` | Read any URL's full text content | @ollama/pi-web-search |
+| | `paper_search` | 200M+ academic papers | Semantic Scholar |
+| | `arxiv_search` | Preprints in CS, math, physics, stats | arXiv |
+| | `wiki_search` | Wikipedia articles | Wikipedia |
+| | `book_search` | Books | Open Library |
 
 ## Skill
 

@@ -4,7 +4,7 @@
   "description": "Complete search toolkit: web_search (news, forums, docs, blogs — your DEFAULT), web_fetch, paper_search, arxiv_search, wiki_search, book_search. Teaches LLM to search proactively. All free, no API keys.",
   "keywords": ["pi-package", "search", "academic", "papers", "wikipedia", "web-search"],
   "pi": {
-    "extensions": ["./index.ts"],
+    "extensions": ["./index.ts", "./node_modules/@ollama/pi-web-search/index.ts"],
     "skills": ["./skills"]
   },
   "dependencies": {

@@ -1,15 +1,10 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-// ─── Helpers ────────────────────────────────────────────────────
 function fmtAuthors(authors: Array<{ name: string }>): string {
   if (!authors || authors.length === 0) return "Unknown";
   return authors.slice(0, 5).map(a => a.name).join(", ") + (authors.length > 5 ? " et al." : "");
 }
-
-// ════════════════════════════════════════════════════════════════
-// TOOLS
-// ════════════════════════════════════════════════════════════════
 
 export default function (pi: ExtensionAPI) {
 
@@ -100,7 +95,6 @@ export default function (pi: ExtensionAPI) {
       if (!resp.ok) throw new Error(`arXiv API error: ${resp.status}`);
       const xml = await resp.text();
 
-      // Parse Atom XML manually
       const entries = xml.split("<entry>").slice(1);
       if (entries.length === 0) {
         return {
@@ -109,8 +103,8 @@ export default function (pi: ExtensionAPI) {
         };
       }
 
-      const tag = (xml: string, tag: string): string => {
-        const m = xml.match(new RegExp(`<${tag}[^>]*>(.*?)</${tag}>`, "s"));
+      const tag = (xml: string, t: string): string => {
+        const m = xml.match(new RegExp(`<${t}[^>]*>(.*?)</${t}>`, "s"));
         return m ? m[1].replace(/<[^>]+>/g, "").trim() : "";
       };
 
@@ -124,8 +118,7 @@ export default function (pi: ExtensionAPI) {
         const arxivId = tag(entry, "id").split("/abs/").pop() || "";
         const pdfLink = arxivId ? `https://arxiv.org/pdf/${arxivId}` : "";
 
-        let line = `${i + 1}. **${title}**\n`;
-        line += `   ${authors}`;
+        let line = `${i + 1}. **${title}**\n   ${authors}`;
         if (arxivId) line += `  [arXiv:${arxivId}](${pdfLink})`;
         if (summary) line += `\n   > ${summary}`;
         return line;
