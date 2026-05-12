@@ -1,15 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-// ─── Constants ──────────────────────────────────────────────────
-const API_KEY = "c29bf8b9ec3d4a8db1899de2240506a1.rJjU-psTI6aeopLLdOLJbG1U";
-const OLLAMA_HOST = "https://ollama.com";
-
 // ─── Helpers ────────────────────────────────────────────────────
-function getKey(): string {
-  return process.env.OLLAMA_API_KEY || API_KEY;
-}
-
 function fmtAuthors(authors: Array<{ name: string }>): string {
   if (!authors || authors.length === 0) return "Unknown";
   return authors.slice(0, 5).map(a => a.name).join(", ") + (authors.length > 5 ? " et al." : "");
@@ -190,107 +182,6 @@ export default function (pi: ExtensionAPI) {
       return {
         content: [{ type: "text", text: lines.join("\n\n") }],
         details: { query: params.query, count: lines.length, results },
-      };
-    },
-  });
-
-  // ── web_search — general web search via Ollama Cloud ─────
-  pi.registerTool({
-    name: "web_search",
-    label: "Web Search",
-    description:
-      "Search the web for real-time information, news, forum discussions, documentation, and any web content. Uses Ollama Cloud's search API.",
-    promptSnippet: "Search the web for any topic, news, docs, or discussions",
-    promptGuidelines: [
-      "Use web_search as your PRIMARY tool for any factual or current query. It searches the entire web — news, forums, docs, blogs, everything.",
-      "web_search is NOT limited to academic or encyclopedic content. Use it for: latest news, StackOverflow answers, GitHub issues, tech blogs, forum discussions, product reviews, documentation, and general information.",
-      "For academic papers specifically, use paper_search. For definitions, wiki_search is also good. But web_search should be your DEFAULT.",
-      "Always search before answering factual questions — your training data has a cutoff.",
-    ],
-    parameters: Type.Object({
-      query: Type.String({ description: "Search query. Be specific — include version numbers, dates, or site: filters for best results." }),
-      max_results: Type.Optional(Type.Number({ description: "Max results (default: 5, max: 10)", default: 5 })),
-    }),
-    async execute(_id, params, _signal, _onUpdate, _ctx) {
-      const maxResults = Math.min(params.max_results ?? 5, 10);
-
-      const resp = await fetch(`${OLLAMA_HOST}/api/experimental/web_search`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${getKey()}`,
-        },
-        body: JSON.stringify({ query: params.query, max_results: maxResults }),
-      });
-
-      if (!resp.ok) {
-        if (resp.status === 401) throw new Error("Ollama Cloud auth failed. Check API key.");
-        throw new Error(`Search API error: ${resp.status}`);
-      }
-
-      const data = (await resp.json()) as any;
-      const results = data.results || [];
-
-      if (results.length === 0) {
-        return {
-          content: [{ type: "text", text: "No results found for: " + params.query }],
-          details: { query: params.query, count: 0 },
-        };
-      }
-
-      const lines = results.map((r: any, i: number) =>
-        `${i + 1}. **${r.title}**\n   URL: ${r.url}\n   ${r.content}`
-      );
-
-      return {
-        content: [{ type: "text", text: lines.join("\n\n") }],
-        details: { query: params.query, count: results.length, results },
-      };
-    },
-  });
-
-  // ── web_fetch — fetch page content via Ollama Cloud ────────
-  pi.registerTool({
-    name: "web_fetch",
-    label: "Web Fetch",
-    description:
-      "Fetch and extract text content from any web page URL. Use after web_search to read a specific result in full. Uses Ollama Cloud's fetch API.",
-    promptSnippet: "Fetch full text content from a URL",
-    promptGuidelines: [
-      "Use web_fetch after web_search to read a promising result in detail.",
-      "web_fetch extracts the main text content, stripping ads and navigation.",
-      "Use for reading documentation pages, blog posts, API references, or any web page you need to understand deeply.",
-    ],
-    parameters: Type.Object({
-      url: Type.String({ description: "Full URL to fetch content from." }),
-    }),
-    async execute(_id, params, _signal, _onUpdate, _ctx) {
-      const resp = await fetch(`${OLLAMA_HOST}/api/experimental/web_fetch`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${getKey()}`,
-        },
-        body: JSON.stringify({ url: params.url }),
-      });
-
-      if (!resp.ok) {
-        if (resp.status === 401) throw new Error("Ollama Cloud auth failed. Check API key.");
-        throw new Error(`Fetch API error: ${resp.status}`);
-      }
-
-      const data = (await resp.json()) as any;
-
-      return {
-        content: [{
-          type: "text",
-          text: [
-            `Title: ${data.title || "(no title)"}`,
-            "",
-            data.content || "(no content)",
-          ].join("\n"),
-        }],
-        details: { title: data.title, url: params.url },
       };
     },
   });
