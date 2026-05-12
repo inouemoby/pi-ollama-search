@@ -8,6 +8,8 @@ Complete search toolkit for [pi coding agent](https://github.com/earendil-works/
 pi install git:github.com/inouemoby/pi-ollama-search
 ```
 
+**No other dependencies needed.** This plugin calls Ollama Cloud's search API directly — you do NOT need to install `@ollama/pi-web-search` separately. It uses the same built-in API key as other pi plugins.
+
 ## Tools
 
 | Priority | Tool | What It Searches |
