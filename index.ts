@@ -23,26 +23,39 @@ async function ddgSearch(query: string, maxResults: number): Promise<Array<{ tit
   const html = await resp.text();
 
   const results: Array<{ title: string; url: string; content: string }> = [];
-  // Parse DuckDuckGo Lite HTML: each result is a <tr> with <a> link and <td class="result-snippet">
-  const rows = html.split('<tr class="result-snippet">').slice(1);
-  for (const row of rows) {
-    if (results.length >= maxResults) break;
-    const linkMatch = row.match(/<a[^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>/);
-    const snippetMatch = row.match(/<td class="result-snippet">([\s\S]*?)<\/td>/);
-    if (linkMatch) {
-      // DDG Lite URLs are redirects like //duckduckgo.com/l/?uddg=...
-      let url = linkMatch[1].replace(/^\/\//, "https://");
-      if (url.includes("/l/?uddg=")) {
-        const decoded = decodeURIComponent(url.split("/l/?uddg=")[1]?.split("&")[0] || url);
-        url = decoded;
-      }
-      results.push({
-        title: linkMatch[2].trim(),
-        url,
-        content: snippetMatch ? snippetMatch[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() : "",
-      });
-    }
+
+  // Structure: <a class='result-link' href="//duckduckgo.com/l/?uddg=REAL_URL">TITLE</a> ... <td class='result-snippet'>SNIPPET</td>
+  const linkRegex = /<a[^>]*class='result-link'[^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>/g;
+  let linkMatch: RegExpExecArray | null;
+
+  // Find snippets separately
+  const snippetRegex = /<td class='result-snippet'>([\s\S]*?)<\/td>/g;
+  const snippets: string[] = [];
+  let snipMatch: RegExpExecArray | null;
+  while ((snipMatch = snippetRegex.exec(html)) !== null) {
+    snippets.push(snipMatch[1].replace(/<[^>]+>/g, "").replace(/&[a-z]+;/g, " ").replace(/\s+/g, " ").trim());
   }
+
+  let idx = 0;
+  while ((linkMatch = linkRegex.exec(html)) !== null && results.length < maxResults) {
+    let rawHref = linkMatch[1];
+    if (rawHref.startsWith("//")) rawHref = "https:" + rawHref;
+
+    // Extract real URL from DDG redirect: /l/?uddg=REAL_URL&...
+    let realUrl = rawHref;
+    const uddgMatch = rawHref.match(/uddg=([^&]+)/);
+    if (uddgMatch) {
+      realUrl = decodeURIComponent(uddgMatch[1]);
+    }
+
+    results.push({
+      title: linkMatch[2].trim(),
+      url: realUrl,
+      content: snippets[idx] || "",
+    });
+    idx++;
+  }
+
   return results;
 }
 
