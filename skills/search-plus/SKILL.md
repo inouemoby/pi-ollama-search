@@ -1,6 +1,6 @@
 ---
 name: search-plus
-description: Comprehensive search toolkit. Web search, academic papers (Semantic Scholar + arXiv), Wikipedia, books, images. Use proactively — your knowledge cutoff is real, and search bridges the gap. When in doubt, SEARCH.
+description: Comprehensive search toolkit. web_search is your DEFAULT for ANY factual query — it covers the entire web (news, forums, docs, blogs, social media). Also includes academic papers (Semantic Scholar + arXiv), Wikipedia, books, and images. Use proactively — your knowledge cutoff is real, and search bridges the gap. When in doubt, SEARCH. When not in doubt, SEARCH ANYWAY.
 ---
 
 # Search Plus — Complete Search Toolkit
