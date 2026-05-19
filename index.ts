@@ -76,7 +76,7 @@ export default function (pi: ExtensionAPI) {
             const results = data.results || [];
             if (results.length > 0) {
               const text = results.map((r: any, i: number) =>
-                `${i + 1}. ${r.title}\n   URL: ${r.url}\n   ${r.content}`
+                `${i + 1}. ${r.title}\n   URL: ${r.url}\n   ${String(r.content || "").slice(0, 300)}`
               ).join("\n\n");
               return {
                 content: [{ type: "text", text }],
@@ -90,7 +90,7 @@ export default function (pi: ExtensionAPI) {
       if (results.length === 0) {
         return { content: [{ type: "text", text: `No results found for: ${params.query}` }], details: { query: params.query, count: 0 } };
       }
-      const text = results.map((r, i) => `${i + 1}. ${r.title}\n   URL: ${r.url}\n   ${r.content}`).join("\n\n");
+      const text = results.map((r, i) => `${i + 1}. ${r.title}\n   URL: ${r.url}\n   ${r.content.slice(0, 300)}`).join("\n\n");
       return {
         content: [{ type: "text", text }],
         details: { source: "duckduckgo", query: params.query, count: results.length },
