@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { Text } from "@earendil-works/pi-tui";
 
 function fmtAuthors(authors: Array<{ name: string }>): string {
   if (!authors || authors.length === 0) return "Unknown";
@@ -154,6 +155,16 @@ export default function (pi: ExtensionAPI) {
         content: [{ type: "text", text: text || "(no text content extracted)" }],
         details: { source: "direct", url: params.url },
       };
+    },
+
+    renderCall(args, theme) {
+      const short = args.url.length > 60 ? args.url.slice(0, 57) + "..." : args.url;
+      return new Text(theme.fg("toolTitle", theme.bold("web_fetch ")) + theme.fg("dim", short), 0, 0);
+    },
+    renderResult(result, { isPartial }, theme) {
+      if (isPartial) return new Text(theme.fg("warning", "Fetching..."), 0, 0);
+      if (result.isError) return new Text(theme.fg("error", "Failed"), 0, 0);
+      return new Text(theme.fg("success", "✓ Page fetched"), 0, 0);
     },
   });
 
