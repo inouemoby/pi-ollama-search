@@ -1,6 +1,11 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { truncateHead, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { Text } from "@earendil-works/pi-tui";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
 
 function fmtAuthors(authors: Array<{ name: string }>): string {
   if (!authors || authors.length === 0) return "Unknown";
@@ -43,6 +48,16 @@ async function ddgSearch(query: string, maxResults: number): Promise<Array<{ tit
 }
 
 export default function (pi: ExtensionAPI) {
+
+  // Truncate page content using pi's built-in truncation.
+  // Saves full content to temp file if truncated, so AI can read it if needed.
+  function truncatePage(raw: string): string {
+    const t = truncateHead(raw, { maxLines: DEFAULT_MAX_LINES, maxBytes: DEFAULT_MAX_BYTES });
+    if (!t.truncated) return t.content;
+    const tmpFile = join(tmpdir(), `pi-fetch-${randomUUID()}.txt`);
+    try { writeFileSync(tmpFile, raw, "utf8"); } catch {}
+    return t.content + `\n\n[Output truncated: ${t.outputLines} of ${t.totalLines} lines (${formatSize(t.outputBytes)} of ${formatSize(t.totalBytes)}). Full content saved to: ${tmpFile}]`;
+  }
 
   // ── web_search ──────────────────────────────────────────────
   pi.registerTool({
@@ -135,10 +150,7 @@ export default function (pi: ExtensionAPI) {
           });
           if (resp.ok) {
             const data = (await resp.json()) as any;
-            return {
-              content: [{ type: "text", text: [`Title: ${data.title}`, "", data.content].join("\n") }],
-              details: { source: "ollama-local", title: data.title, url: params.url },
-            };
+            return { content: [{ type: "text", text: truncatePage(`Title: ${data.title}\n\n${data.content || ""}`) }] };
           }
         } catch { /* fallback */ }
       }
@@ -153,11 +165,8 @@ export default function (pi: ExtensionAPI) {
         .replace(/<style[\s\S]*?<\/style>/gi, "")
         .replace(/<[^>]+>/g, " ")
         .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
-        .replace(/\s+/g, " ").trim().slice(0, 8000);
-      return {
-        content: [{ type: "text", text: text || "(no text content extracted)" }],
-        details: { source: "direct", url: params.url },
-      };
+        .replace(/\s+/g, " ").trim();
+      return { content: [{ type: "text", text: truncatePage(text || "(no text content extracted)") }] };
     },
     renderCall(args, theme) {
       const u = args.url.length > 60 ? args.url.slice(0, 57) + "..." : args.url;
