@@ -16,7 +16,6 @@ async function isOllamaLocalAvailable(): Promise<boolean> {
   } catch { return false; }
 }
 
-// DuckDuckGo fallback
 async function ddgSearch(query: string, maxResults: number): Promise<Array<{ title: string; url: string; content: string }>> {
   const url = `https://lite.duckduckgo.com/lite?q=${encodeURIComponent(query)}`;
   const resp = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (compatible; pi-search-plus/1.0)" } });
@@ -64,7 +63,6 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_id, params, signal, _onUpdate, _ctx) {
       const maxResults = Math.min(params.max_results ?? 5, 10);
-      // Try local Ollama
       if (await isOllamaLocalAvailable()) {
         try {
           const resp = await fetch("http://localhost:11434/api/experimental/web_search", {
@@ -77,32 +75,37 @@ export default function (pi: ExtensionAPI) {
             const data = (await resp.json()) as any;
             const results = data.results || [];
             if (results.length > 0) {
-              const formatted = results.map((r: any, i: number) =>
+              const text = results.map((r: any, i: number) =>
                 `${i + 1}. ${r.title}\n   URL: ${r.url}\n   ${r.content}`
               ).join("\n\n");
               return {
-                content: [{ type: "text", text: "Found " + results.length + " result(s) via Ollama local." }],
-                details: { source: "ollama-local", query: params.query, count: results.length, results },
+                content: [{ type: "text", text }],
+                details: { source: "ollama-local", query: params.query, count: results.length },
               };
             }
           }
-        } catch { /* fallback to DDG */ }
+        } catch { /* fallback */ }
       }
-      // Fallback: DuckDuckGo
       const results = await ddgSearch(params.query, maxResults);
       if (results.length === 0) {
-        return {
-          content: [{ type: "text", text: `No results found for: ${params.query}` }],
-          details: { query: params.query, count: 0 },
-        };
+        return { content: [{ type: "text", text: `No results found for: ${params.query}` }], details: { query: params.query, count: 0 } };
       }
-      const formatted = results.map((r: any, i: number) =>
-        `${i + 1}. ${r.title}\n   URL: ${r.url}\n   ${r.content}`
-      ).join("\n\n");
+      const text = results.map((r, i) => `${i + 1}. ${r.title}\n   URL: ${r.url}\n   ${r.content}`).join("\n\n");
       return {
-        content: [{ type: "text", text: "Found " + results.length + " result(s) via DuckDuckGo." }],
-        details: { source: "duckduckgo", query: params.query, count: results.length, results },
+        content: [{ type: "text", text }],
+        details: { source: "duckduckgo", query: params.query, count: results.length },
       };
+    },
+    renderCall(args, theme) {
+      const q = args.query.length > 50 ? args.query.slice(0, 47) + "..." : args.query;
+      return new Text(theme.fg("toolTitle", theme.bold("web_search ")) + theme.fg("dim", q), 0, 0);
+    },
+    renderResult(result, { isPartial }, theme) {
+      if (isPartial) return new Text(theme.fg("warning", "Searching..."), 0, 0);
+      if (result.isError) return new Text(theme.fg("error", "Failed"), 0, 0);
+      const c = result.details?.count ?? 0;
+      if (c === 0) return new Text(theme.fg("warning", "No results"), 0, 0);
+      return new Text(theme.fg("success", `✓ ${c} result(s)`), 0, 0);
     },
   });
 
@@ -156,10 +159,9 @@ export default function (pi: ExtensionAPI) {
         details: { source: "direct", url: params.url },
       };
     },
-
     renderCall(args, theme) {
-      const short = args.url.length > 60 ? args.url.slice(0, 57) + "..." : args.url;
-      return new Text(theme.fg("toolTitle", theme.bold("web_fetch ")) + theme.fg("dim", short), 0, 0);
+      const u = args.url.length > 60 ? args.url.slice(0, 57) + "..." : args.url;
+      return new Text(theme.fg("toolTitle", theme.bold("web_fetch ")) + theme.fg("dim", u), 0, 0);
     },
     renderResult(result, { isPartial }, theme) {
       if (isPartial) return new Text(theme.fg("warning", "Fetching..."), 0, 0);
@@ -168,7 +170,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // ── paper_search — Semantic Scholar ────────────────────────
+  // ── paper_search ────────────────────────────────────────────
   pi.registerTool({
     name: "paper_search",
     label: "Paper Search",
@@ -192,10 +194,7 @@ export default function (pi: ExtensionAPI) {
       const data = (await resp.json()) as any;
       const papers = data.data || [];
       if (papers.length === 0) {
-        return {
-          content: [{ type: "text", text: `No papers found for: ${params.query}` }],
-          details: { query: params.query, count: 0 },
-        };
+        return { content: [{ type: "text", text: `No papers found for: ${params.query}` }], details: { query: params.query, count: 0 } };
       }
       const lines = papers.map((p: any, i: number) => {
         const title = p.title || "Untitled";
@@ -208,16 +207,27 @@ export default function (pi: ExtensionAPI) {
         if (p.externalIds?.DOI) ids.push("DOI: " + p.externalIds.DOI);
         if (p.externalIds?.ArXiv) ids.push("arXiv: " + p.externalIds.ArXiv);
         const idStr = ids.length > 0 ? "  [" + ids.join(" | ") + "]" : "";
-        let line = `${i + 1}. **${title}**\n   ${authors} (${year}) — cited ${citations}×`;
+        let line = `${i + 1}. **${title}**\n   ${authors} (${year}) — cited ${citations}x`;
         if (venue) line += `  · ${venue}`;
         line += idStr;
         if (abstract) line += `\n   > ${abstract}`;
         return line;
       });
       return {
-        content: [{ type: "text", text: "Found " + papers.length + " paper(s) via Semantic Scholar." }],
-        details: { query: params.query, count: papers.length, papers },
+        content: [{ type: "text", text: lines.join("\n\n") }],
+        details: { query: params.query, count: papers.length },
       };
+    },
+    renderCall(args, theme) {
+      const q = args.query.length > 50 ? args.query.slice(0, 47) + "..." : args.query;
+      return new Text(theme.fg("toolTitle", theme.bold("paper_search ")) + theme.fg("dim", q), 0, 0);
+    },
+    renderResult(result, { isPartial }, theme) {
+      if (isPartial) return new Text(theme.fg("warning", "Searching..."), 0, 0);
+      if (result.isError) return new Text(theme.fg("error", "Failed"), 0, 0);
+      const c = result.details?.count ?? 0;
+      if (c === 0) return new Text(theme.fg("warning", "No results"), 0, 0);
+      return new Text(theme.fg("success", `✓ ${c} paper(s)`), 0, 0);
     },
   });
 
@@ -245,13 +255,10 @@ export default function (pi: ExtensionAPI) {
       const xml = await resp.text();
       const entries = xml.split("<entry>").slice(1);
       if (entries.length === 0) {
-        return {
-          content: [{ type: "text", text: `No arXiv papers found for: ${params.query}` }],
-          details: { query: params.query, count: 0 },
-        };
+        return { content: [{ type: "text", text: `No arXiv papers found for: ${params.query}` }], details: { query: params.query, count: 0 } };
       }
-      const tag = (xml: string, t: string): string => {
-        const m = xml.match(new RegExp(`<${t}[^>]*>(.*?)</${t}>`, "s"));
+      const tag = (s: string, t: string): string => {
+        const m = s.match(new RegExp(`<${t}[^>]*>(.*?)</${t}>`, "s"));
         return m ? m[1].replace(/<[^>]+>/g, "").trim() : "";
       };
       const lines = entries.map((entry, i) => {
@@ -267,9 +274,20 @@ export default function (pi: ExtensionAPI) {
         return line;
       });
       return {
-        content: [{ type: "text", text: "Found " + lines.length + " preprint(s) via arXiv." }],
+        content: [{ type: "text", text: lines.join("\n\n") }],
         details: { query: params.query, count: lines.length },
       };
+    },
+    renderCall(args, theme) {
+      const q = args.query.length > 50 ? args.query.slice(0, 47) + "..." : args.query;
+      return new Text(theme.fg("toolTitle", theme.bold("arxiv_search ")) + theme.fg("dim", q), 0, 0);
+    },
+    renderResult(result, { isPartial }, theme) {
+      if (isPartial) return new Text(theme.fg("warning", "Searching..."), 0, 0);
+      if (result.isError) return new Text(theme.fg("error", "Failed"), 0, 0);
+      const c = result.details?.count ?? 0;
+      if (c === 0) return new Text(theme.fg("warning", "No results"), 0, 0);
+      return new Text(theme.fg("success", `✓ ${c} preprint(s)`), 0, 0);
     },
   });
 
@@ -297,10 +315,7 @@ export default function (pi: ExtensionAPI) {
       const data = (await resp.json()) as any;
       const results = data.query?.search || [];
       if (results.length === 0) {
-        return {
-          content: [{ type: "text", text: `No Wikipedia articles found for: ${params.query}` }],
-          details: { query: params.query, count: 0 },
-        };
+        return { content: [{ type: "text", text: `No Wikipedia articles found for: ${params.query}` }], details: { query: params.query, count: 0 } };
       }
       const lines = results.map((r: any, i: number) => {
         const title = r.title;
@@ -309,9 +324,20 @@ export default function (pi: ExtensionAPI) {
         return `${i + 1}. **${title}**  — [link](${link})\n   > ${snippet}`;
       });
       return {
-        content: [{ type: "text", text: "Found " + lines.length + " article(s) via Wikipedia." }],
+        content: [{ type: "text", text: lines.join("\n\n") }],
         details: { query: params.query, count: lines.length },
       };
+    },
+    renderCall(args, theme) {
+      const q = args.query.length > 50 ? args.query.slice(0, 47) + "..." : args.query;
+      return new Text(theme.fg("toolTitle", theme.bold("wiki_search ")) + theme.fg("dim", q), 0, 0);
+    },
+    renderResult(result, { isPartial }, theme) {
+      if (isPartial) return new Text(theme.fg("warning", "Searching..."), 0, 0);
+      if (result.isError) return new Text(theme.fg("error", "Failed"), 0, 0);
+      const c = result.details?.count ?? 0;
+      if (c === 0) return new Text(theme.fg("warning", "No results"), 0, 0);
+      return new Text(theme.fg("success", `✓ ${c} article(s)`), 0, 0);
     },
   });
 
@@ -338,10 +364,7 @@ export default function (pi: ExtensionAPI) {
       const data = (await resp.json()) as any;
       const docs = data.docs || [];
       if (docs.length === 0) {
-        return {
-          content: [{ type: "text", text: `No books found for: ${params.query}` }],
-          details: { query: params.query, count: 0 },
-        };
+        return { content: [{ type: "text", text: `No books found for: ${params.query}` }], details: { query: params.query, count: 0 } };
       }
       const lines = docs.map((d: any, i: number) => {
         const title = d.title || "Untitled";
@@ -356,9 +379,20 @@ export default function (pi: ExtensionAPI) {
         return line;
       });
       return {
-        content: [{ type: "text", text: "Found " + lines.length + " book(s) via Open Library." }],
+        content: [{ type: "text", text: lines.join("\n\n") }],
         details: { query: params.query, count: lines.length },
       };
+    },
+    renderCall(args, theme) {
+      const q = args.query.length > 50 ? args.query.slice(0, 47) + "..." : args.query;
+      return new Text(theme.fg("toolTitle", theme.bold("book_search ")) + theme.fg("dim", q), 0, 0);
+    },
+    renderResult(result, { isPartial }, theme) {
+      if (isPartial) return new Text(theme.fg("warning", "Searching..."), 0, 0);
+      if (result.isError) return new Text(theme.fg("error", "Failed"), 0, 0);
+      const c = result.details?.count ?? 0;
+      if (c === 0) return new Text(theme.fg("warning", "No results"), 0, 0);
+      return new Text(theme.fg("success", `✓ ${c} book(s)`), 0, 0);
     },
   });
 }
