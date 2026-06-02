@@ -74,10 +74,10 @@ export default function (pi: ExtensionAPI) {
     ],
     parameters: Type.Object({
       query: Type.String({ description: "Search query. Be specific — include version numbers, dates, or site: filters for best results." }),
-      max_results: Type.Optional(Type.Number({ description: "Max results (default: 5)", default: 5 })),
+      max_results: Type.Optional(Type.Number({ description: "Max results (default: 10, max 10 for Ollama)" })),
     }),
     async execute(_id, params, signal, _onUpdate, _ctx) {
-      const maxResults = Math.min(params.max_results ?? 5, 10);
+      const maxResults = Math.min(params.max_results ?? 10, 10);
       if (await isOllamaLocalAvailable()) {
         try {
           const resp = await fetch("http://localhost:11434/api/experimental/web_search", {
