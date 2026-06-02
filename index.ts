@@ -140,25 +140,11 @@ export default function (pi: ExtensionAPI) {
       url: Type.String({ description: "Full URL to fetch content from." }),
     }),
     async execute(_id, params, signal, _onUpdate, _ctx) {
-      if (await isOllamaLocalAvailable()) {
-        try {
-          const resp = await fetch("http://localhost:11434/api/experimental/web_fetch", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url: params.url }),
-            signal,
-          });
-          if (resp.ok) {
-            const data = (await resp.json()) as any;
-            return { content: [{ type: "text", text: truncatePage(`Title: ${data.title}\n\n${data.content || ""}`) }] };
-          }
-        } catch { /* fallback */ }
-      }
       const resp = await fetch(params.url, {
         headers: { "User-Agent": "Mozilla/5.0 (compatible; pi-search-plus/1.0)" },
         signal,
       });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching ${params.url}`);
+      if (!resp.ok) return err(`HTTP ${resp.status} fetching ${params.url}`);
       const html = await resp.text();
       // Use Readability to extract main content (article body), strip nav/ads/sidebar
       let title = "";
