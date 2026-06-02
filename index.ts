@@ -2,10 +2,24 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { truncateHead, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { Text } from "@earendil-works/pi-tui";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
+
+function getOllamaCloudKey(): string | null {
+  const env = process.env.OLLAMA_CLOUD_API_KEY;
+  if (env) return env;
+  const agentDir = process.env.PI_CODING_AGENT_DIR || join(process.env.USERPROFILE || process.env.HOME || ".", ".pi/agent");
+  const authPath = join(agentDir, "auth.json");
+  if (existsSync(authPath)) {
+    try {
+      const auth = JSON.parse(readFileSync(authPath, "utf-8"));
+      if (auth["ollama-cloud"]?.key) return auth["ollama-cloud"].key;
+    } catch { /* ignore */ }
+  }
+  return null;
+}
 
 function fmtAuthors(authors: Array<{ name: string }>): string {
   if (!authors || authors.length === 0) return "Unknown";
@@ -101,6 +115,35 @@ export default function (pi: ExtensionAPI) {
           }
         } catch { /* fallback */ }
       }
+      // Fallback 2: Ollama Cloud API
+      const cloudKey = getOllamaCloudKey();
+      if (cloudKey) {
+        try {
+          const resp = await fetch("https://ollama.com/api/web_search", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${cloudKey}`,
+            },
+            body: JSON.stringify({ query: params.query, max_results: maxResults }),
+            signal,
+          });
+          if (resp.ok) {
+            const data = (await resp.json()) as any;
+            const results = data.results || [];
+            if (results.length > 0) {
+              const text = results.map((r: any, i: number) =>
+                `${i + 1}. ${r.title}\n   URL: ${r.url}\n   ${String(r.content || "").slice(0, 300)}`
+              ).join("\n\n");
+              return {
+                content: [{ type: "text", text }],
+                details: { source: "ollama-cloud", query: params.query, count: results.length },
+              };
+            }
+          }
+        } catch { /* fallback */ }
+      }
+      // Fallback 3: DuckDuckGo
       const results = await ddgSearch(params.query, maxResults);
       if (results.length === 0) {
         return { content: [{ type: "text", text: `No results found for: ${params.query}` }], details: { query: params.query, count: 0 } };
