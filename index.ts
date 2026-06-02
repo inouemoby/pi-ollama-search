@@ -160,13 +160,30 @@ export default function (pi: ExtensionAPI) {
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching ${params.url}`);
       const html = await resp.text();
-      const text = html
-        .replace(/<script[\s\S]*?<\/script>/gi, "")
-        .replace(/<style[\s\S]*?<\/style>/gi, "")
-        .replace(/<[^>]+>/g, " ")
-        .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
-        .replace(/\s+/g, " ").trim();
-      return { content: [{ type: "text", text: truncatePage(text || "(no text content extracted)") }] };
+      // Use Readability to extract main content (article body), strip nav/ads/sidebar
+      let title = "";
+      let text = "";
+      try {
+        const { JSDOM } = await import("jsdom");
+        const { Readability } = await import("@mozilla/readability");
+        const dom = new JSDOM(html, { url: params.url });
+        const reader = new Readability(dom.window.document);
+        const article = reader.parse();
+        if (article?.textContent) {
+          title = article.title || "";
+          text = article.textContent.replace(/\s+/g, " ").trim();
+        }
+      } catch {
+        // Fallback: strip tags manually if readability not available
+        text = html
+          .replace(/<script[\s\S]*?<\/script>/gi, "")
+          .replace(/<style[\s\S]*?<\/style>/gi, "")
+          .replace(/<[^>]+>/g, " ")
+          .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
+          .replace(/\s+/g, " ").trim();
+      }
+      const header = title ? `Title: ${title}\n\n` : "";
+      return { content: [{ type: "text", text: truncatePage(header + (text || "(no text content extracted)")) }] };
     },
     renderCall(args, theme) {
       const u = args.url.length > 60 ? args.url.slice(0, 57) + "..." : args.url;
