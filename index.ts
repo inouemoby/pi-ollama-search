@@ -26,6 +26,80 @@ function fmtAuthors(authors: Array<{ name: string }>): string {
   return authors.slice(0, 5).map(a => a.name).join(", ") + (authors.length > 5 ? " et al." : "");
 }
 
+// ── Deep search helpers ─────────────────────────────────────
+
+// Common URL path segments that are too generic to be useful as exclusion tokens
+const GENERIC_SEGMENTS = new Set([
+  "blog", "post", "posts", "blob", "tree", "tag", "tags", "releases", "release",
+  "issues", "issue", "pull", "wiki", "docs", "doc", "src", "lib", "app",
+  "main", "master", "head", "latest", "index", "home", "page", "search",
+  "api", "www", "articles", "article", "content", "upload", "files",
+  "static", "assets", "images", "img", "css", "js", "en", "us", "cn",
+  "com", "org", "net", "io", "dev", "html", "htm", "php", "json",
+  "stable", "project", "resources", "resource", "web", "new", "best",
+  "guide", "guides", "tutorial", "tutorials", "learn", "getting-started",
+  "overview", "introduction", "readme", "changelog", "changes",
+]);
+
+/**
+ * Extract unique, non-query-overlapping tokens from a URL for use as -inurl exclusions.
+ * Strategy: only use segments that are clearly identifiers (hashes, numeric slugs)
+ * or unique slugs that don't overlap with the query words or the domain.
+ * Skip anything generic, version-like, or overlapping with the search query.
+ */
+function extractExclusionTokens(url: string, queryWords: string[]): string[] {
+  try {
+    const u = new URL(url);
+    const segments = u.pathname.split("/").filter(Boolean);
+    const qLower = queryWords.map(w => w.toLowerCase());
+    const tokens: string[] = [];
+
+    for (const seg of segments) {
+      // Remove common file extensions
+      const clean = seg.replace(/\.(html|htm|md|php|json|xml|aspx?)$/i, "");
+      if (clean.length < 4) continue;
+
+      // Skip if it's part of the domain
+      if (u.hostname.toLowerCase().includes(clean.toLowerCase())) continue;
+
+      // Skip pure version numbers (e.g. "1.0.0", "v19.0.0", "19.0")
+      if (/^v?\d+(\.\d+)*$/.test(clean)) continue;
+
+      // Skip pure year/date segments
+      if (/^\d{4}$/.test(clean)) continue;
+
+      // Skip generic path segments
+      if (GENERIC_SEGMENTS.has(clean.toLowerCase())) continue;
+
+      // Skip if overlapping with any query word
+      const cl = clean.toLowerCase();
+      const overlapsQuery = qLower.some(qw => {
+        // Direct containment
+        if (cl.includes(qw) || qw.includes(cl)) return true;
+        // Also check after removing hyphens/dashes ("react-19" matches "react" or "19")
+        const clParts = cl.split(/[\-_]/);
+        return clParts.some(p => p.length >= 2 && qw.includes(p));
+      });
+      if (overlapsQuery) continue;
+
+      // Skip segments with dots (e.g. "struct.Runtime") — -inurl doesn't handle them
+      if (clean.includes(".")) continue;
+
+      // Candidate passed all filters
+      // Hex hash (>= 7 hex chars) — best token
+      if (/^[0-9a-f]{7,}$/i.test(clean)) { tokens.push(clean); continue; }
+      // Mixed alphanumeric (contains both letters and digits) — likely an ID/slug
+      if (/[a-z]/i.test(clean) && /\d/.test(clean)) { tokens.push(clean); continue; }
+      // Pure alpha slug (>= 6 chars) — likely an author/org name
+      if (/^[a-z][\-_a-z0-9]*$/i.test(clean) && clean.length >= 6) { tokens.push(clean); }
+    }
+
+    return tokens;
+  } catch {
+    return [];
+  }
+}
+
 async function isOllamaLocalAvailable(): Promise<boolean> {
   try {
     const ctrl = new AbortController();
@@ -73,97 +147,141 @@ export default function (pi: ExtensionAPI) {
     return t.content + `\n\n[Output truncated: ${t.outputLines} of ${t.totalLines} lines (${formatSize(t.outputBytes)} of ${formatSize(t.totalBytes)}). Full content saved to: ${tmpFile}]`;
   }
 
+  // ── Core single-round search ──────────────────────────────
+  async function singleSearch(query: string, signal?: AbortSignal): Promise<{ results: Array<{ title: string; url: string; content: string }>; source: string }> {
+    // Try Ollama local
+    if (await isOllamaLocalAvailable()) {
+      try {
+        const resp = await fetch("http://localhost:11434/api/experimental/web_search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query, max_results: 10 }),
+          signal,
+        });
+        if (resp.ok) {
+          const data = (await resp.json()) as any;
+          const results = (data.results || []) as Array<{ title: string; url: string; content: string }>;
+          if (results.length > 0) return { results, source: "ollama-local" };
+        }
+      } catch { /* fallback */ }
+    }
+    // Try Ollama Cloud
+    const cloudKey = getOllamaCloudKey();
+    if (cloudKey) {
+      try {
+        const resp = await fetch("https://ollama.com/api/web_search", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${cloudKey}`,
+          },
+          body: JSON.stringify({ query, max_results: 10 }),
+          signal,
+        });
+        if (resp.ok) {
+          const data = (await resp.json()) as any;
+          const results = (data.results || []) as Array<{ title: string; url: string; content: string }>;
+          if (results.length > 0) return { results, source: "ollama-cloud" };
+        }
+      } catch { /* fallback */ }
+    }
+    // Fallback: DuckDuckGo
+    const results = await ddgSearch(query, 10);
+    return { results, source: results.length > 0 ? "duckduckgo" : "none" };
+  }
+
   // ── web_search ──────────────────────────────────────────────
   pi.registerTool({
     name: "web_search",
     label: "Web Search",
     description:
-      "Search the web for real-time information, news, forum discussions, documentation, and any web content. Uses local Ollama search if available, falls back to DuckDuckGo.",
+      "Search the web for real-time information, news, forum discussions, documentation, and any web content. Defaults to deep search mode which runs multiple rounds with exclusion-based pagination to gather more unique results.",
     promptSnippet: "Search the web for any topic, news, docs, or discussions",
     promptGuidelines: [
       "Use web_search as your DEFAULT for any factual or current query. It searches the entire web — news, forums, docs, blogs, everything.",
-      "web_search is NOT limited to academic or encyclopedic content. Use it for: latest news, StackOverflow answers, GitHub issues, tech blogs, forum discussions, product reviews, documentation, and general information.",
-      "For academic papers specifically, use paper_search. For definitions, wiki_search is also good. But web_search should be your DEFAULT.",
+      "web_search defaults to deep mode: it runs multiple search rounds (default 3, max 10), accumulating URL-based exclusions to find more unique results. Each round returns up to 10 results.",
+      "For a quick single-round search, use mode=\"simple\".",
       "Always search before answering factual questions — your training data has a cutoff.",
     ],
     parameters: Type.Object({
       query: Type.String({ description: "Search query. Be specific — include version numbers, dates, or site: filters for best results." }),
-      max_results: Type.Optional(Type.Number({ description: "Max results (default: 10, max 10 for Ollama)" })),
+      mode: Type.Optional(Type.String({ description: "Search mode: 'deep' (default, multi-round) or 'simple' (single round).", default: "deep" })),
+      rounds: Type.Optional(Type.Number({ description: "Number of search rounds for deep mode (default: 3, max: 10).", default: 3 })),
     }),
     async execute(_id, params, signal, _onUpdate, _ctx) {
-      const maxResults = Math.min(params.max_results ?? 10, 10);
-      if (await isOllamaLocalAvailable()) {
-        try {
-          const resp = await fetch("http://localhost:11434/api/experimental/web_search", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ query: params.query, max_results: maxResults }),
-            signal,
-          });
-          if (resp.ok) {
-            const data = (await resp.json()) as any;
-            const results = data.results || [];
-            if (results.length > 0) {
-              const text = results.map((r: any, i: number) =>
-                `${i + 1}. ${r.title}\n   URL: ${r.url}\n   ${String(r.content || "").slice(0, 300)}`
-              ).join("\n\n");
-              return {
-                content: [{ type: "text", text }],
-                details: { source: "ollama-local", query: params.query, count: results.length },
-              };
-            }
-          }
-        } catch { /* fallback */ }
+      const mode = params.mode ?? "deep";
+      const maxRounds = Math.min(params.rounds ?? 3, 10);
+      const queryWords = params.query.split(/\s+/).filter(Boolean);
+
+      if (mode === "simple") {
+        // ── Simple mode: single round, return up to 10 ──
+        const { results, source } = await singleSearch(params.query, signal);
+        if (results.length === 0) {
+          return { content: [{ type: "text", text: `No results found for: ${params.query}` }], details: { query: params.query, count: 0 } };
+        }
+        const text = results.map((r, i) =>
+          `${i + 1}. ${r.title}\n   URL: ${r.url}\n   ${String(r.content || "").slice(0, 300)}`
+        ).join("\n\n");
+        return { content: [{ type: "text", text }], details: { source, query: params.query, count: results.length } };
       }
-      // Fallback 2: Ollama Cloud API
-      const cloudKey = getOllamaCloudKey();
-      if (cloudKey) {
-        try {
-          const resp = await fetch("https://ollama.com/api/web_search", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${cloudKey}`,
-            },
-            body: JSON.stringify({ query: params.query, max_results: maxResults }),
-            signal,
-          });
-          if (resp.ok) {
-            const data = (await resp.json()) as any;
-            const results = data.results || [];
-            if (results.length > 0) {
-              const text = results.map((r: any, i: number) =>
-                `${i + 1}. ${r.title}\n   URL: ${r.url}\n   ${String(r.content || "").slice(0, 300)}`
-              ).join("\n\n");
-              return {
-                content: [{ type: "text", text }],
-                details: { source: "ollama-cloud", query: params.query, count: results.length },
-              };
-            }
-          }
-        } catch { /* fallback */ }
+
+      // ── Deep mode: multi-round with exclusion-based pagination ──
+      const allResults: Array<{ title: string; url: string; content: string; round: number }> = [];
+      const seenUrls = new Set<string>();
+      const excludedTokens = new Set<string>();
+      let source = "none";
+
+      for (let round = 1; round <= maxRounds; round++) {
+        // Build query with exclusion tokens (limit to 15 tokens to avoid query bloat)
+        const exclParts = [...excludedTokens].slice(-15).map(t => `-inurl:${t}`);
+        const fullQuery = exclParts.length > 0
+          ? `${params.query} ${exclParts.join(" ")}`
+          : params.query;
+
+        const { results, source: src } = await singleSearch(fullQuery, signal);
+        source = src;
+
+        let newCount = 0;
+        for (const r of results) {
+          if (seenUrls.has(r.url)) continue;
+          seenUrls.add(r.url);
+          allResults.push({ ...r, round });
+          newCount++;
+
+          // Extract exclusion tokens from this URL for future rounds
+          const tokens = extractExclusionTokens(r.url, queryWords);
+          for (const t of tokens) excludedTokens.add(t);
+        }
+
+        // Stop if no new results found
+        if (newCount === 0) break;
       }
-      // Fallback 3: DuckDuckGo
-      const results = await ddgSearch(params.query, maxResults);
-      if (results.length === 0) {
+
+      if (allResults.length === 0) {
         return { content: [{ type: "text", text: `No results found for: ${params.query}` }], details: { query: params.query, count: 0 } };
       }
-      const text = results.map((r, i) => `${i + 1}. ${r.title}\n   URL: ${r.url}\n   ${r.content.slice(0, 300)}`).join("\n\n");
+
+      const text = allResults.map((r, i) =>
+        `${i + 1}. ${r.title}\n   URL: ${r.url}\n   ${String(r.content || "").slice(0, 300)}`
+      ).join("\n\n");
+
       return {
         content: [{ type: "text", text }],
-        details: { source: "duckduckgo", query: params.query, count: results.length },
+        details: { source, query: params.query, count: allResults.length, rounds: Math.min(maxRounds, allResults[allResults.length - 1]?.round ?? 1) },
       };
     },
     renderCall(args, theme) {
-      const q = args.query.length > 50 ? args.query.slice(0, 47) + "..." : args.query;
-      return new Text(theme.fg("toolTitle", theme.bold("web_search ")) + theme.fg("dim", q), 0, 0);
+      const mode = args.mode === "simple" ? " [simple]" : args.rounds ? ` [deep ×${args.rounds}]` : " [deep ×3]";
+      return new Text(theme.fg("toolTitle", theme.bold("web_search ")) + theme.fg("dim", args.query + mode), 0, 0);
     },
     renderResult(result, { isPartial }, theme) {
       if (isPartial) return new Text(theme.fg("warning", "Searching..."), 0, 0);
       if (result.isError) return new Text(theme.fg("error", "Failed"), 0, 0);
       const c = result.details?.count ?? 0;
       if (c === 0) return new Text(theme.fg("warning", "No results"), 0, 0);
-      return new Text(theme.fg("success", `✓ ${c} result(s)`), 0, 0);
+      const rounds = result.details?.rounds;
+      const suffix = rounds > 1 ? ` in ${rounds} rounds` : "";
+      return new Text(theme.fg("success", `✓ ${c} result(s)${suffix}`), 0, 0);
     },
   });
 
@@ -215,8 +333,7 @@ export default function (pi: ExtensionAPI) {
       return { content: [{ type: "text", text: truncatePage(header + (text || "(no text content extracted)")) }] };
     },
     renderCall(args, theme) {
-      const u = args.url.length > 60 ? args.url.slice(0, 57) + "..." : args.url;
-      return new Text(theme.fg("toolTitle", theme.bold("web_fetch ")) + theme.fg("dim", u), 0, 0);
+      return new Text(theme.fg("toolTitle", theme.bold("web_fetch ")) + theme.fg("dim", args.url), 0, 0);
     },
     renderResult(result, { isPartial }, theme) {
       if (isPartial) return new Text(theme.fg("warning", "Fetching..."), 0, 0);
@@ -274,8 +391,7 @@ export default function (pi: ExtensionAPI) {
       };
     },
     renderCall(args, theme) {
-      const q = args.query.length > 50 ? args.query.slice(0, 47) + "..." : args.query;
-      return new Text(theme.fg("toolTitle", theme.bold("paper_search ")) + theme.fg("dim", q), 0, 0);
+      return new Text(theme.fg("toolTitle", theme.bold("paper_search ")) + theme.fg("dim", args.query), 0, 0);
     },
     renderResult(result, { isPartial }, theme) {
       if (isPartial) return new Text(theme.fg("warning", "Searching..."), 0, 0);
@@ -334,8 +450,7 @@ export default function (pi: ExtensionAPI) {
       };
     },
     renderCall(args, theme) {
-      const q = args.query.length > 50 ? args.query.slice(0, 47) + "..." : args.query;
-      return new Text(theme.fg("toolTitle", theme.bold("arxiv_search ")) + theme.fg("dim", q), 0, 0);
+      return new Text(theme.fg("toolTitle", theme.bold("arxiv_search ")) + theme.fg("dim", args.query), 0, 0);
     },
     renderResult(result, { isPartial }, theme) {
       if (isPartial) return new Text(theme.fg("warning", "Searching..."), 0, 0);
@@ -384,8 +499,7 @@ export default function (pi: ExtensionAPI) {
       };
     },
     renderCall(args, theme) {
-      const q = args.query.length > 50 ? args.query.slice(0, 47) + "..." : args.query;
-      return new Text(theme.fg("toolTitle", theme.bold("wiki_search ")) + theme.fg("dim", q), 0, 0);
+      return new Text(theme.fg("toolTitle", theme.bold("wiki_search ")) + theme.fg("dim", args.query), 0, 0);
     },
     renderResult(result, { isPartial }, theme) {
       if (isPartial) return new Text(theme.fg("warning", "Searching..."), 0, 0);
@@ -439,8 +553,7 @@ export default function (pi: ExtensionAPI) {
       };
     },
     renderCall(args, theme) {
-      const q = args.query.length > 50 ? args.query.slice(0, 47) + "..." : args.query;
-      return new Text(theme.fg("toolTitle", theme.bold("book_search ")) + theme.fg("dim", q), 0, 0);
+      return new Text(theme.fg("toolTitle", theme.bold("book_search ")) + theme.fg("dim", args.query), 0, 0);
     },
     renderResult(result, { isPartial }, theme) {
       if (isPartial) return new Text(theme.fg("warning", "Searching..."), 0, 0);
